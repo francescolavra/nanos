@@ -100,7 +100,7 @@ KERNCFLAGS+=	-march=rv64gc -mabi=lp64d
 endif
 
 ifeq ($(findstring clang,$(COMPILER_VERSION)),clang)
-TARGET_CFLAGS=	-target $(ARCH)-unknown-linux-elf
+TARGET_CFLAGS=	-target $(ARCH)
 endif
 
 KERNCFLAGS+=	$(TARGET_CFLAGS) -fno-omit-frame-pointer
