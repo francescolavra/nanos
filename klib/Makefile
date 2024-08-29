@@ -195,6 +195,7 @@ SRCS-test/page_table= \
 
 all: klib-syms $(ADDITIONAL_PROGRAMS)
 
+OBJDIR= $(PLATFORMOBJDIR)
 KLIB_SYMS= $(OBJDIR)/klib-syms.lds
 
 DEBUG_STRIP= y
@@ -222,10 +223,6 @@ $(KLIB_SYMS): $(PROGRAM_BINARIES)
 # delete linker script backup file
 	$(Q) $(RM) $(KLIB_SYMS).bak
 
-ifeq ($(findstring clang,$(COMPILER_VERSION)),clang)
-ELF_TARGET=     -target $(ARCH)-elf
-CFLAGS+=        $(ELF_TARGET)
-endif
 LD=             $(CROSS_COMPILE)ld
 
 INCLUDES= \
@@ -259,5 +256,5 @@ CFLAGS+=	$(KERNCFLAGS) -O3 $(INCLUDES) -fPIC $(DEFINES)
 LDFLAGS+=	-shared -Bsymbolic -nostdlib -T$(ARCHDIR)/klib.lds
 
 CLEANFILES+=	$(KLIB_SYMS)
-CLEANDIRS+=	$(OUTDIR)/klib/vendor $(OUTDIR)/klib/vendor/mbedtls \
+CLEANDIRS+=	$(OBJDIR)/vendor/mbedtls \
 	$(OBJDIR)/bin/test

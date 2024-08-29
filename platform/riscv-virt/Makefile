@@ -192,7 +192,7 @@ VDSO_SRCDIR=    $(SRCDIR)/kernel
 VDSO_OBJDIR=    $(OBJDIR)/vdso
 VDSO_SRCS=      $(VDSO_SRCDIR)/vdso.c $(VDSO_SRCDIR)/vdso-now.c
 VDSO_OBJS=      $(patsubst $(VDSO_SRCDIR)/%.c,$(VDSO_OBJDIR)/%.o,$(VDSO_SRCS))
-VDSO_CFLAGS=    -DKERNEL -DBUILD_VDSO -I$(INCLUDES) -I$(OBJDIR) -I$(SRCDIR) -fPIC -c
+VDSO_CFLAGS=    $(TARGET_CFLAGS) -DKERNEL -DBUILD_VDSO -I$(INCLUDES) -I$(OBJDIR) -I$(SRCDIR) -fPIC -c
 VDSO_LDFLAGS=   -nostdlib -fPIC -shared --build-id=none --hash-style=both --eh-frame-hdr -T$(ARCHDIR)/vdso.lds
 VDSO_DEPS=      $(patsubst %.o,%.d,$(VDSO_OBJS))
 OBJDUMPFLAGS=	-d -S
@@ -200,7 +200,7 @@ STRIPFLAGS=	-g
 
 DEPFILES+=      $(VDSO_DEPS)
 CLEANFILES+=    $(foreach f,gitversion.c frame.inc kernel.dis bin/kernel.elf src/unix/ftrace.* $(ARCHDIR)/ftrace.*,$(OBJDIR)/$f) $(VDSO_OBJDIR)/vdso.so $(VDSO_OBJDIR)/vdso-image.c $(VDSO_OBJDIR)/vdso-offset.h $(VDSO_OBJS) $(VDSO_DEPS) $(BOOTIMG) $(KERNEL)
-CLEANDIRS+=     $(foreach d,output/platform output src vdso/src/$(ARCH) vdso/src vdso vendor vendor/lwip vendor/lwip/src vendor/lwip/src/netif vendor/lwip/src/netif/ppp platform,$(OBJDIR)/$d)
+CLEANDIRS+=     $(foreach d,output/platform output vdso/src/$(ARCH) vdso/src vdso vendor/lwip vendor/lwip/src vendor/lwip/src/netif vendor/lwip/src/netif/ppp platform,$(OBJDIR)/$d)
 
 OBJCOPYFLAGS	= -S -O binary
 
@@ -275,14 +275,7 @@ endif
 	@ $(MKDIR) $(dir $(IMAGE))
 	$(Q) cd $(ROOTDIR); $(AWK) 'BEGIN{getline l < "$(PLATFORMDIR)/test-libs"}/TEST-LIBS/{gsub("TEST-LIBS",l)}1' $(ROOTDIR)/test/runtime/$(TARGET).manifest | $(MKFS) $(TARGET_ROOT_OPT) -b $(BOOTIMG) -k $(KERNEL) $(TRACELOG_MKFS_OPTS) $(IMAGE)
 
-release: mkfs kernel
-	$(Q) $(RM) -r release
-	$(Q) $(MKDIR) release
-	$(CP) $(MKFS) release
-	$(CP) $(KERNEL) release
-	cd release && $(TAR) -czvf nanos-release-$(REL_OS)-${version}.tar.gz *
-
-.PHONY: mkfs vdsogen kernel target image release
+.PHONY: mkfs vdsogen boot kernel target image
 
 $(VDSOGEN):
 	@$(MAKE) -C $(ROOTDIR)/tools vdsogen
@@ -305,7 +298,7 @@ $(VDSO_OBJDIR)/vdso-offset.h: $(VDSO_OBJDIR)/vdso.so
 
 $(OBJDIR)/src/$(ARCH)/unix_machine.o: $(VDSO_OBJDIR)/vdso-offset.h
 
-$(PROG-kernel.elf): linker_script $(OUTDIR)/klib/klib-syms.lds $(VDSO_OBJDIR)/vdso-image.c
+$(PROG-kernel.elf): linker_script $(OBJDIR)/klib-syms.lds $(VDSO_OBJDIR)/vdso-image.c
 
 $(KERNEL): $(PROG-kernel.elf)
 	$(call cmd,strip)

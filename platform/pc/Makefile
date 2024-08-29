@@ -236,7 +236,7 @@ VDSO_SRCDIR=    $(SRCDIR)/kernel
 VDSO_OBJDIR=    $(OBJDIR)/vdso
 VDSO_SRCS=      $(VDSO_SRCDIR)/vdso.c $(VDSO_SRCDIR)/vdso-now.c
 VDSO_OBJS=      $(patsubst $(VDSO_SRCDIR)/%.c,$(VDSO_OBJDIR)/%.o,$(VDSO_SRCS))
-VDSO_CFLAGS=    -DKERNEL -DBUILD_VDSO -I$(INCLUDES) -I$(OBJDIR) -I$(OUTDIR) -I$(SRCDIR) -fPIC -c
+VDSO_CFLAGS=    $(TARGET_CFLAGS) -DKERNEL -DBUILD_VDSO -I$(INCLUDES) -I$(OBJDIR) -I$(OUTDIR) -I$(SRCDIR) -fPIC -c
 VDSO_LDFLAGS=   -nostdlib -fPIC -shared --build-id=none --hash-style=both --eh-frame-hdr -T$(ARCHDIR)/vdso.lds
 VDSO_DEPS=      $(patsubst %.o,%.d,$(VDSO_OBJS))
 OBJDUMPFLAGS=	-d -S -M intel-mnemonic
@@ -244,7 +244,7 @@ STRIPFLAGS=	-g
 
 DEPFILES+=      $(VDSO_DEPS)
 CLEANFILES+=    $(foreach f,gitversion.c frame.inc kernel.dis kernel.elf src/unix/ftrace.* $(ARCHDIR)/ftrace.*,$(OBJDIR)/$f) $(VDSO_OBJDIR)/vdso.so $(VDSO_OBJDIR)/vdso-image.c $(VDSO_OBJS) $(VDSO_DEPS) $(KERNEL)
-CLEANDIRS+=     $(foreach d,output/platform output src src/aws src/hyperv vdso/src/$(ARCH) vdso/src vdso vendor vendor/lwip vendor/lwip/src vendor/lwip/src/netif vendor/lwip/src/netif/ppp vendor/acpica vendor/acpica/source vendor/acpica/source/components platform,$(OBJDIR)/$d)
+CLEANDIRS+=     $(foreach d,output/platform output src/aws src/hyperv vdso/src/$(ARCH) vdso/src vdso vendor/lwip vendor/lwip/src vendor/lwip/src/netif vendor/lwip/src/netif/ppp vendor/acpica vendor/acpica/source vendor/acpica/source/components platform,$(OBJDIR)/$d)
 
 msg_vdsogen=    VDSOGEN	$@
 cmd_vdsogen=    $(VDSOGEN) $(VDSO_OBJDIR)/vdso.so $@
@@ -310,15 +310,7 @@ endif
 	@ $(MKDIR) $(dir $(IMAGE))
 	$(Q) cd $(ROOTDIR); $(AWK) 'BEGIN{getline l < "$(PLATFORMDIR)/test-libs"}/TEST-LIBS/{gsub("TEST-LIBS",l)}1' $(ROOTDIR)/test/runtime/$(TARGET).manifest | $(MKFS) $(TARGET_ROOT_OPT) -b $(BOOTIMG) $(MKFS_UEFI) -k $(KERNEL) -t "(debug_exit:t)" $(TRACELOG_MKFS_OPTS) $(EXTRA_MKFS_OPTS) $(IMAGE)
 
-release: mkfs boot kernel
-	$(Q) $(RM) -r release
-	$(Q) $(MKDIR) release
-	$(CP) $(MKFS) release
-	$(CP) $(BOOTIMG) release
-	$(CP) $(KERNEL) release
-	cd release && $(TAR) -czvf nanos-release-$(REL_OS)-${version}.tar.gz *
-
-.PHONY: mkfs vdsogen boot kernel kernel.dis target image release
+.PHONY: mkfs vdsogen boot kernel kernel.dis target image
 
 $(VDSOGEN):
 	@$(MAKE) -C $(ROOTDIR)/tools vdsogen
@@ -336,7 +328,7 @@ $(VDSO_OBJDIR)/vdso.so: $(VDSO_OBJS)
 $(VDSO_OBJDIR)/vdso-image.c: $(VDSOGEN) $(VDSO_OBJDIR)/vdso.so
 	$(call cmd,vdsogen)
 
-$(PROG-kernel.elf): linker_script $(OUTDIR)/klib/klib-syms.lds $(VDSO_OBJDIR)/vdso-image.c
+$(PROG-kernel.elf): linker_script $(OBJDIR)/klib-syms.lds $(VDSO_OBJDIR)/vdso-image.c
 
 $(KERNEL): $(PROG-kernel.elf)
 	$(call cmd,strip)
@@ -350,24 +342,17 @@ $(OBJDIR)/frame.inc: $(ARCHDIR)/frame.h
 	$(call cmd,sed)
 
 ifeq ($(UNAME_s),Darwin)
-ELF_TARGET=     -target x86_64-elf
-CFLAGS+=        $(ELF_TARGET)
-VDSO_CFLAGS+=   $(ELF_TARGET)
 VDSO_LDFLAGS+=  -undefined dynamic_lookup
-LD=             x86_64-elf-ld
-OBJDUMP=        x86_64-elf-objdump
-STRIP=          x86_64-elf-strip
 REL_OS=		darwin
 # disable rdtscp as a workaround on mac since it can't pass the instruction through
 # see https://bugs.launchpad.net/qemu/+bug/1894836
 QEMU_ACCEL=	-accel $(ACCEL) -cpu host,-rdtscp
 ACCEL?=		hvf
 else
-# XXX already defined?
-LD=             $(CROSS_COMPILE)ld
 REL_OS=		linux
 QEMU_ACCEL=	-enable-kvm -cpu host
 endif
+LD=             $(CROSS_COMPILE)ld
 
 ##############################################################################
 # run

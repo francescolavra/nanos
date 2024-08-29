@@ -6,7 +6,7 @@ SUBDIR=		$(PLATFORMDIR) klib test tools
 TARGET=		webg
 
 CLEANFILES+=	$(IMAGE)
-CLEANDIRS+=	$(OUTDIR)/image $(OUTDIR)/platform/$(PLATFORM) $(OUTDIR)/platform
+CLEANDIRS+=	$(OUTDIR)/image $(PLATFORMOBJDIR)/vendor $(PLATFORMOBJDIR)/bin $(PLATFORMOBJDIR)
 
 ACPICA_DIR=	$(VENDORDIR)/acpica
 LWIPDIR=	$(VENDORDIR)/lwip
@@ -57,23 +57,22 @@ $(ACPICA_DIR)/.vendored: GITFLAGS= --depth 1  https://github.com/acpica/acpica.g
 $(LWIPDIR)/.vendored: GITFLAGS= --depth 1  https://github.com/nanovms/lwip.git -b STABLE-2_1_x
 $(MBEDTLS_DIR)/.vendored: GITFLAGS= --depth 1 https://github.com/nanovms/mbedtls.git
 
-image: $(THIRD_PARTY) tools
-	$(Q) $(MAKE) -C klib
-	$(Q) $(MAKE) -C $(PLATFORMDIR) image TARGET=$(TARGET)
-
-release: $(THIRD_PARTY) tools
+kernel: $(THIRD_PARTY) contgen
 	$(Q) $(MAKE) -C $(PLATFORMDIR) boot
 	$(Q) $(MAKE) -C klib
 	$(Q) $(MAKE) -C $(PLATFORMDIR) kernel
+
+image: kernel
+	$(Q) $(MAKE) -C $(PLATFORMDIR) image TARGET=$(TARGET)
+
+release: kernel
 	$(Q) $(RM) -r release
 	$(Q) $(MKDIR) release
-	$(CP) $(MKFS) release
-	$(CP) $(DUMP) release
 	if [ -f $(BOOTIMG) ]; then $(CP) $(BOOTIMG) release; fi
 	if [ -f $(UEFI_LOADER) ]; then $(CP) $(UEFI_LOADER) release; fi
 	$(CP) $(KERNEL) release
 	$(Q) $(MKDIR) release/klibs
-	bash -O extglob -c "$(CP) $(OUTDIR)/klib/bin/!(test) release/klibs"
+	bash -O extglob -c "$(CP) $(PLATFORMOBJDIR)/bin/!(test|*.dbg|kernel.*) release/klibs"
 	cd release && $(TAR) -czvf nanos-release-$(REL_OS)-${version}.tar.gz *
 
 target: contgen
