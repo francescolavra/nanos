@@ -1,8 +1,13 @@
+name: Build
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - 'feature/**'
+      - 'fix/**'
+  pull_request:
 jobs:
-  my_job:
-    name: mac-build
+  mac-build:
+    name: Mac Build
     runs-on: macos-latest
     steps:
     - name: Check out repository
