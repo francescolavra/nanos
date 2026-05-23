@@ -156,13 +156,23 @@ static inline void storage_rw_internal(storage st, boolean write, void * buf,
         return;
     }
     virtqueue vq = st->command;
-    vqmsg m = allocate_vqmsg(vq);
-    assert(m != INVALID_ADDRESS);
+    vqmsg m = allocate_vqmsg(vq, 3);
+    if (m == INVALID_ADDRESS) {
+        deallocate_virtio_blk_req(st, req, req_phys);
+        apply(sh, timm_oom);
+        return;
+    }
     vqmsg_push(vq, m, req_phys, VIRTIO_BLK_REQ_HEADER_SIZE, false);
     vqmsg_push(vq, m, physical_from_virtual(buf), nsectors * st->block_size, !write);
     u64 statusp = req_phys + VIRTIO_BLK_REQ_HEADER_SIZE;
     vqmsg_push(vq, m, statusp, VIRTIO_BLK_REQ_STATUS_SIZE, true);
     vqfinish c = closure(st->v->general, complete, st, sh, req, req_phys);
+    if (c == INVALID_ADDRESS) {
+        deallocate_vqmsg(vq, m);
+        deallocate_virtio_blk_req(st, req, req_phys);
+        apply(sh, timm_oom);
+        return;
+    }
     vqmsg_commit(vq, m, c);
     return;
   out_inval:
@@ -170,13 +180,16 @@ static inline void storage_rw_internal(storage st, boolean write, void * buf,
     apply(sh, timm("result", "%s", err));
 }
 
-static void virtio_storage_io_commit(storage st, virtqueue vq, vqmsg msg, virtio_blk_req req,
-                                     u64 req_phys, status_handler completion)
+static boolean virtio_storage_io_commit(storage st, virtqueue vq, vqmsg msg, virtio_blk_req req,
+                                        u64 req_phys, status_handler completion)
 {
-    vqmsg_push(vq, msg, req_phys + VIRTIO_BLK_REQ_HEADER_SIZE, VIRTIO_BLK_REQ_STATUS_SIZE, true);
+    if (!vqmsg_push(vq, msg, req_phys + VIRTIO_BLK_REQ_HEADER_SIZE, VIRTIO_BLK_REQ_STATUS_SIZE, true))
+        return false;
     vqfinish c = closure(st->v->general, complete, st, completion, req, req_phys);
-    assert(c != INVALID_ADDRESS);
+    if (c == INVALID_ADDRESS)
+        return false;
     vqmsg_commit(vq, msg, c);
+    return true;
 }
 
 static void virtio_storage_io_sg(storage st, boolean write, sg_list sg, range blocks,
@@ -194,12 +207,13 @@ static void virtio_storage_io_sg(storage st, boolean write, sg_list sg, range bl
         if (!req) {
             req = allocate_virtio_blk_req(st, write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN,
                                           blocks.start, &req_phys);
-            if (req == INVALID_ADDRESS) {
-                apply(sh, timm_oom);
-                return;
+            if (req == INVALID_ADDRESS)
+                goto oom;
+            msg = allocate_vqmsg(vq, st->seg_max + 2);
+            if (msg == INVALID_ADDRESS) {
+                deallocate_virtio_blk_req(st, req, req_phys);
+                goto oom;
             }
-            msg = allocate_vqmsg(vq);
-            assert(msg != INVALID_ADDRESS);
             vqmsg_push(vq, msg, req_phys, VIRTIO_BLK_REQ_HEADER_SIZE, false);
             desc_count = 0;
         }
@@ -215,15 +229,29 @@ static void virtio_storage_io_sg(storage st, boolean write, sg_list sg, range bl
                 m = allocate_merge(h, sh);
                 sh = apply_merge(m);
             }
-            virtio_storage_io_commit(st, vq, msg, req, req_phys, m ? apply_merge(m) : sh);
+            if (!virtio_storage_io_commit(st, vq, msg, req, req_phys, m ? apply_merge(m) : sh)) {
+                deallocate_vqmsg(vq, msg);
+                deallocate_virtio_blk_req(st, req, req_phys);
+                goto oom;
+            }
             req = 0;
         }
     }
     if (req) {
-        virtio_storage_io_commit(st, vq, msg, req, req_phys, m ? apply_merge(m) : sh);
+        if (!virtio_storage_io_commit(st, vq, msg, req, req_phys, m ? apply_merge(m) : sh)) {
+            deallocate_vqmsg(vq, msg);
+            deallocate_virtio_blk_req(st, req, req_phys);
+            goto oom;
+        }
     }
     if (m)
         apply(sh, STATUS_OK);
+    return;
+  oom:
+    if (m)
+        apply_merge(m)(timm_oom);
+    else
+        apply(sh, timm_oom);
 }
 
 static void storage_flush(storage st, status_handler s)
@@ -236,12 +264,21 @@ static void storage_flush(storage st, status_handler s)
         return;
     }
     virtqueue vq = st->command;
-    vqmsg m = allocate_vqmsg(vq);
-    assert(m != INVALID_ADDRESS);
+    vqmsg m = allocate_vqmsg(vq, 2);
+    if (m == INVALID_ADDRESS) {
+        deallocate_virtio_blk_req(st, req, req_phys);
+        apply(s, timm_oom);
+        return;
+    }
     vqmsg_push(vq, m, req_phys, VIRTIO_BLK_REQ_HEADER_SIZE, false);
     vqmsg_push(vq, m, req_phys + VIRTIO_BLK_REQ_HEADER_SIZE, VIRTIO_BLK_REQ_STATUS_SIZE, true);
     vqfinish c = closure(st->v->general, complete, st, s, req, req_phys);
-    assert(c != INVALID_ADDRESS);
+    if (c == INVALID_ADDRESS) {
+        deallocate_vqmsg(vq, m);
+        deallocate_virtio_blk_req(st, req, req_phys);
+        apply(s, timm_oom);
+        return;
+    }
     vqmsg_commit(vq, m, c);
 }
 

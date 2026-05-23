@@ -115,8 +115,12 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
     vnet vn = netif->state;
 
     virtqueue txq = vn->txq_map[current_cpu()->id];
-    vqmsg m = allocate_vqmsg(txq);
-    assert(m != INVALID_ADDRESS);
+    int num_desc = 1;
+    for (struct pbuf * q = p; q != NULL; q = q->next)
+        num_desc++;
+    vqmsg m = allocate_vqmsg(txq, num_desc);
+    if (m == INVALID_ADDRESS)
+        return ERR_MEM;
     vqmsg_push(txq, m, vn->empty_phys, vn->net_header_len, false);
 
     pbuf_ref(p);
@@ -124,7 +128,13 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
     for (struct pbuf * q = p; q != NULL; q = q->next)
         vqmsg_push(txq, m, physical_from_virtual(q->payload), q->len, false);
 
-    vqmsg_commit(txq, m, closure((heap)vn->txhandlers, tx_complete, p));
+    vqfinish f = closure((heap)vn->txhandlers, tx_complete, p);
+    if (f == INVALID_ADDRESS) {
+        deallocate_vqmsg(txq, m);
+        pbuf_free(p);
+        return ERR_MEM;
+    }
+    vqmsg_commit(txq, m, f);
     
     MIB2_STATS_NETIF_ADD(netif, ifoutoctets, p->tot_len);
     if (((u8_t *)p->payload)[0] & 1) {
@@ -144,20 +154,20 @@ static err_t low_level_output(struct netif *netif, struct pbuf *p)
 static vqmsg vnet_rxq_push(vnet vn, xpbuf x, int *desc_count)
 {
     virtqueue rxq = x->rx->q;
-    vqmsg m = allocate_vqmsg(rxq);
+    boolean modern = vtdev_is_modern(vn->dev) || (vn->dev->features & VIRTIO_F_ANY_LAYOUT);
+    *desc_count = modern ? 1 : 2;
+    vqmsg m = allocate_vqmsg(rxq, *desc_count);
     if (m == INVALID_ADDRESS)
         return m;
     int rxbuflen = vn->rxbuflen;
     pbuf_alloced_custom(PBUF_RAW, rxbuflen, PBUF_REF, &x->p, x + 1, rxbuflen);
     u64 phys = physical_from_virtual(x + 1);
-    if (vtdev_is_modern(vn->dev) || (vn->dev->features & VIRTIO_F_ANY_LAYOUT)) {
+    if (modern) {
         vqmsg_push(rxq, m, phys, rxbuflen, true);
-        *desc_count = 1;
     } else {
         int header_len = vn->net_header_len;
         vqmsg_push(rxq, m, phys, header_len, true);
         vqmsg_push(rxq, m, phys + header_len, rxbuflen - header_len, true);
-        *desc_count = 2;
     }
     return m;
 }
@@ -348,7 +358,7 @@ static boolean vnet_ctrl_cmd(vnet vn, u8 class, u8 cmd, void *data, u32 data_len
     if (command == INVALID_ADDRESS)
         return false;
     virtqueue vq = vn->ctl;
-    vqmsg m = allocate_vqmsg(vq);
+    vqmsg m = allocate_vqmsg(vq, (data_len > 0) ? 3 : 2);
     if (m == INVALID_ADDRESS) {
         deallocate(h, command, sizeof(*command));
         return false;

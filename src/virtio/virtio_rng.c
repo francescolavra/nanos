@@ -45,8 +45,11 @@ static void virtio_rng_fill(entropy_buf ebuf)
 {
     virtio_rng_debug("%s: ebuf %p\n", func_ss, ebuf);
     virtqueue vq = virtio_rng.requestq;
-    vqmsg m = allocate_vqmsg(vq);
-    assert(m != INVALID_ADDRESS);
+    vqmsg m = allocate_vqmsg(vq, 1);
+    if (m == INVALID_ADDRESS) {
+        msg_err("%s: failed to allocate vqmsg", func_ss);
+        return;
+    }
     ebuf->filling = true;
     vqmsg_push(vq, m, ebuf->phys, VIRTIO_RNG_BUFSIZE, true);
     vqmsg_commit(vq, m, (vqfinish)&ebuf->fill_complete);
